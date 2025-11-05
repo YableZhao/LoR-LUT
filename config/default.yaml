@@ -12,26 +12,27 @@ data:
 model:
   G: 33
   K: 8
-  R: 32
+  R: 0
 
 train:
-  iters: 20000
+  iters: 20000 #20000
   batch: 1
   patch: 512
   log_every: 100
-  val_every: 10000
+  val_every: 4000
   amp: true
 
 loss:
   l1: 1.0
   de2000: 0.0
   tv: 0.001
+  mono: 10.0
   dl2: 0.001
   lpips: 0.0
   alpha_l2: 0.0001
 
 optim:
-  lr: 0.0001
+  lr: 0.0001 #0.0001
   weight_decay: 0.0001
 
 sched:

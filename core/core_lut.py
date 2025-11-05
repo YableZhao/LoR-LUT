@@ -170,6 +170,26 @@ class LoRIA3DLUT(nn.Module):
         img_full:[B,3,H,W] full-res for lookup
         """
         alpha = self.weight_pred(img_lr)                    # [B,K]
+        B = alpha.size(0)
+
+        # If R <= 0, disable residual branch and use bases only
+        if self.R <= 0:
+            L = self.fuse_bases(alpha)                      # [B,G,G,G,3]
+            out = self.apply_lut(img_full, L)               # [B,3,H,W]
+            delta = torch.zeros(
+                (B, self.G, self.G, self.G, 3),
+                device=img_lr.device,
+                dtype=self.bases.dtype,
+            )
+            aux = {
+                "alpha": alpha,
+                "delta": delta,
+                "L_final": L,
+                "delta_norm": torch.tensor(0.0, device=img_lr.device, dtype=self.bases.dtype),
+            }
+            return out, aux
+
+        # Residual branch enabled
         u,v,w,c = self.resid_pred(img_lr)                  # low-rank
         delta = cp_residual_to_lut(u,v,w,c)                # [B,G,G,G,3]
         # Amplify residual to make it effective, regulated by dl2 loss

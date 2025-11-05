@@ -11,7 +11,7 @@ from data.paired_folder import PairedFolderDataset
 from losses.delta_e import delta_e_2000_srgb
 from losses.lpips_wrapper import LPIPSWrapper
 from utils.metrics import psnr, deltaE2000_mean
-from utils.tv import tv_3d, l2_residual
+from utils.tv import tv_3d, l2_residual, monotonicity_3d
 
 def set_seed(seed):
     random.seed(seed); torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
@@ -97,12 +97,17 @@ def train_one(cfg, work_dir):
                     weights_norm = (alpha ** 2).mean()
                     loss = loss + cfg["loss"]["alpha_l2"] * weights_norm
                 
-                # Regularization losses (TV and Delta L2)
+                # Regularization losses (TV, Monotonicity and Delta L2)
                 # We use the LUT and delta passed from the model via aux dictionary
                 if cfg["loss"]["tv"] > 0:
                     final_lut = aux['L_final']
                     # TV loss on raw LUT (no clamp), following IA-3DLUT baseline
                     loss = loss + cfg["loss"]["tv"] * tv_3d(final_lut)
+
+                # Monotonicity regularization: penalize negative slopes along LUT axes
+                if cfg["loss"].get("mono", 0) > 0:
+                    final_lut = aux['L_final']
+                    loss = loss + cfg["loss"]["mono"] * monotonicity_3d(final_lut)
                 
                 if cfg["loss"]["dl2"] > 0:
                     delta = aux['delta']
