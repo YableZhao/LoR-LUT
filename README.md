@@ -1,16 +1,16 @@
 
-# LoR-IA-3DLUT (Starter)
+# LoR-LUT (Starter)
 
-一个可直接在 Google Colab 上训练的最小可用实现，包含：
-- 基于 IA-3DLUT 的多基 LUT 融合 + **低秩（CP）残差**（LoR-IA-3DLUT）
-- 可导三线性插值（默认）；四面体插值留有接口位点
-- 损失：L1 + ΔE2000（Lab） + TV(LUT) + L2(ΔL)（可选 LPIPS）
-- Paired-Folder 数据加载（任意成对数据集，按文件名对齐即可）
-- 导出任意输入图像对应的 `.cube` LUT（无空间门控版本）
+A minimal, ready-to-train implementation that runs directly on Google Colab, featuring:
+- Multi-basis LUT fusion + **low-rank (CP) residual** (LoR-LUT)
+- Differentiable trilinear interpolation (default); tetrahedral interpolation interface reserved
+- Losses: L1 + ΔE2000 (Lab) + TV(LUT) + L2(ΔL) (optional LPIPS)
+- Paired-Folder data loading (any paired dataset, aligned by filename)
+- Export the final `.cube` LUT for any input image (non-spatial-gating version)
 
-> **目录结构**
+> **Directory Structure**
 ```
-lor_ia3dlut_starter/
+LoR-LUT/
   core/
     core_lut.py
   data/
@@ -37,82 +37,112 @@ lor_ia3dlut_starter/
 
 ---
 
-## 0. 在 Colab 启动（建议步骤）
+## 0. Getting Started on Colab (Recommended)
 
-1. 打开此仓并把整个文件夹上传到你的 Google Drive（例如：`/MyDrive/lor_ia3dlut_starter`）。
-2. 在 Colab 新建 Notebook，或直接用 `notebooks/colab_quickstart.ipynb`（上传到 Drive 后在 Colab 打开）。
-3. 在 Colab 里执行以下（如果用我们提供的 notebook，会自动执行）：
+1. Clone this repo and upload the entire folder to your Google Drive (e.g., `/MyDrive/LoR-LUT`).
+2. Create a new Notebook in Colab, or directly use `notebooks/colab_quickstart.ipynb` (open it in Colab after uploading to Drive).
+3. Run the following in Colab (if using our provided notebook, this will execute automatically):
 ```python
-!nvidia-smi  # 查看 GPU
+!nvidia-smi  # Check GPU
 %cd /content
 from google.colab import drive
 drive.mount('/content/drive')
-%cd /content/drive/MyDrive/lor_ia3dlut_starter
+%cd /content/drive/MyDrive/LoR-LUT
 !pip install -r requirements.txt
 ```
 
 ---
 
-## 1. 准备成对数据（Paired-Folder）
+## 1. Prepare Paired Data (Paired-Folder)
 
-将数据组织为：
+Organize your data as follows:
 ```
 /dataset_root/
   train/
-    input/   # 输入图像（如相机原图/较差画质）
-    gt/      # 对应目标图像（如专家修图/DSLR 参考）
+    input/   # Input images (e.g., camera raw / lower quality)
+    gt/      # Corresponding target images (e.g., expert retouched / DSLR reference)
   val/
     input/
     gt/
 ```
 
-**要求**：`input/` 与 `gt/` 文件名一一对应（如 `0001.jpg` 在两边都存在）。格式支持 `.jpg/.png/.tif`。  
-如用 MIT-Adobe FiveK 的 sRGB 成对版本或 DPED，都可整理为此结构。
+**Requirements**: Filenames in `input/` and `gt/` must match one-to-one (e.g., `0001.jpg` exists in both directories). Supported formats: `.jpg/.png/.tif`.
+Datasets such as the sRGB paired version of MIT-Adobe FiveK or DPED can be organized into this structure.
 
 ---
 
-## 2. 启动训练（示例）
+## 2. Start Training (Example)
 
 ```bash
-# 以默认参数在 /dataset_root 上训练
+# Train on /dataset_root with default parameters
 python train.py   --data.root /content/drive/MyDrive/datasets/FiveK_paired   --work_dir runs/fivek_lor   --cfg config/default.yaml
 ```
 
-**可选参数覆盖**：
-- `--train.patch 512`：训练随机裁剪边长（默认 512）
-- `--train.batch 16`：batch 大小
-- `--model.G 33`、`--model.K 8`、`--model.R 8`
-- `--loss.lpips 0.05`：LPIPS 权重（需要安装 `lpips`）
-- `--optim.lr 1e-3`、`--train.iters 120000` 等
+**Optional parameter overrides**:
+- `--train.patch 512`: Random crop size for training (default 512)
+- `--train.batch 16`: Batch size
+- `--model.G 33`, `--model.K 8`, `--model.R 8`
+- `--loss.lpips 0.05`: LPIPS weight (requires `lpips` package)
+- `--optim.lr 1e-3`, `--train.iters 120000`, etc.
 
-训练日志保存在 `work_dir`，`best.ckpt` 会按验证 PSNR/ΔE 选择。
+Training logs are saved in `work_dir`. `best.ckpt` is selected based on validation PSNR/ΔE.
 
 ---
 
-## 3. 评估与导出 .cube
+## 3. Evaluation and .cube Export
 
-**评估（计算 PSNR/ΔE2000/LPIPS 可选）**
+**Evaluation (computes PSNR / ΔE2000 / optional LPIPS)**
 ```bash
 python evaluate.py   --data.root /content/drive/MyDrive/datasets/FiveK_paired/val   --ckpt runs/fivek_lor/best.ckpt   --out_dir runs/fivek_lor/val_vis
 ```
 
-**导出某张图像对应的最终 LUT（.cube）**
+**Export the final LUT (.cube) for a given image**
 ```bash
 python export/export_image_lut.py   --ckpt runs/fivek_lor/best.ckpt   --image /content/sample.jpg   --out_cube /content/sample_Lstar.cube
 ```
 
-> 导出的 `.cube` 可直接用于调色工具/ISP，插值假设为三线性（tetra 可在部署端切换）。
+> The exported `.cube` file can be used directly in color grading tools / ISP pipelines. Interpolation assumes trilinear (tetrahedral can be switched on the deployment side).
 
 ---
 
-## 4. 小贴士（与论文一致）
+## 4. Tips (Consistent with the Paper)
 
-- 模型以下采样至 256² 的图像预测参数，对整图做一次 LUT 查表，因此能 4K 实时推理。
-- 建议**训练在 sRGB 0-1** 的通道上，并使用 ΔE2000 作为色差感知损失；若掌握 RAW→线性 sRGB 的正确流程，可在此基础上切换到线性空间。
-- 四面体插值（tetrahedral）在小网格下更鲁棒，但实现更复杂；本实现默认三线性，保持数值稳定与易读性。
+- The model predicts parameters from images downsampled to 256², then performs a single LUT lookup on the full image, enabling real-time inference at 4K resolution.
+- It is recommended to **train in sRGB 0–1** channel space and use ΔE2000 as the perceptual color difference loss. If you have a proper RAW → linear sRGB pipeline, you can switch to linear space on this basis.
+- Tetrahedral interpolation is more robust at small grid sizes but more complex to implement. This implementation defaults to trilinear for numerical stability and readability.
 
 ---
 
-## 5. 许可证与致谢
+## 4.1 K=0 Full Residual Mode
 
-此 Starter 用于学术/研究快速复现，欢迎在论文中引用你的实现。
+**Purpose**: Remove the basis LUTs (K=0) and perform image-adaptive enhancement solely through low-rank residuals, while maintaining a stable starting point and loss compatibility.
+
+- **Implementation (Residual around Identity)**
+  - Final LUT: L = Identity + delta.
+  - When K=0, the model does not predict alpha or fuse basis LUTs; instead, it uses a fixed identity LUT (buffer) as the bias.
+  - The residual branch (R>0) operates as usual. When R=0, the residual branch is disabled (delta=0), leaving only basis LUT fusion. If both K=0 and R=0, L degenerates to the identity LUT.
+
+- **Training and Losses**
+  - L1 / ΔE2000 / LPIPS: Same as standard configuration, computed on the output image.
+  - TV / Monotonicity: Computed on L_final (Identity + delta); the identity LUT is not updated — gradients flow only to delta.
+  - DL2 (L2 on delta): Keep as is.
+  - Alpha L2: Automatically skipped when K=0 (code handles empty alpha).
+
+- **Logging / Visualization**
+  - Alpha metrics (e.g., amax) in training logs show 0 when K=0.
+  - In the viewer, Fused LUT displays as Identity; Residual and Final LUT visualizations remain functional.
+
+- **Usage**
+  - Set `model.K` to 0 in the config (`config/default.yaml`).
+  - Other settings (e.g., `model.R`, loss weights) can be configured as usual.
+
+- **Runtime Benchmark**
+  - `bench_runtime.py` supports K=0: skips alpha prediction and basis fusion, reports weight prediction as 0ms, and uses the identity LUT as fused.
+
+**Note**: If the identity LUT were made trainable, it would degenerate into "global basis LUT + residual", similar to K=1 with alpha≡1, which is no longer "fully residual". The current implementation uses a fixed identity LUT (buffer) to maintain the strict definition of full residual mode.
+
+---
+
+## 5. License and Acknowledgments
+
+This Starter is intended for rapid academic/research reproduction. You are welcome to cite your implementation in publications.
