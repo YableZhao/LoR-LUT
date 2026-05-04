@@ -12,12 +12,12 @@ data:
 model:
   G: 33
   K: 0 #when k = 0, our implementation has protect the alpha_l2 so maybe you don't need to set alpha_l2 to zero.
-  R: 4
+  R: 8        # 4 -> 8: 翻倍 capacity, 32K -> 65K params
 
 train:
-  iters: 200000 #20000
-  batch: 1
-  patch: 0
+  iters: 1000000     # 200k -> 1M: 长训
+  batch: 8           # 1 -> 8: T4 batch=1 几乎全是 kernel-launch 开销, batch=8 吞吐 4-5x
+  patch: 336         # 0 -> 336: batch>1 必须裁切到固定尺寸 (PPR10K 360x540 -> 336x336 随机裁)
   log_every: 20000
   val_every: 100000
   amp: true
