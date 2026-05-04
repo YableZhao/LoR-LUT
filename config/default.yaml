@@ -17,7 +17,7 @@ model:
 train:
   iters: 1000000     # 200k -> 1M: 长训
   batch: 8           # 1 -> 8: T4 batch=1 几乎全是 kernel-launch 开销, batch=8 吞吐 4-5x
-  patch: 336         # 0 -> 336: batch>1 必须裁切到固定尺寸 (PPR10K 360x540 -> 336x336 随机裁)
+  patch: 256         # batch>1 必须裁切到固定尺寸. 256 比 336 安全 (PPR10K 有些图短边 ~304, 336 会跳过裁切导致 batch shape 不齐)
   log_every: 20000
   val_every: 100000
   amp: true
