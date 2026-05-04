@@ -5,7 +5,7 @@ import contextlib
 import torch
 import torch.nn.functional as F
 
-from core.core_lut import LoRIA3DLUT, cp_residual_to_lut
+from core.core_lut import LoRIA3DLUT, cp_residual_to_lut, create_identity_lut
 
 
 def _sync(device: str):
@@ -33,9 +33,13 @@ def bench_once(model: LoRIA3DLUT, device: str, H: int = 2160, W: int = 3840, amp
 
     with amp_ctx:
         _sync(device); t0 = _ms()
-        # Weight predictor
-        alpha = model.weight_pred(x_lr)
-        _sync(device); t1 = _ms()
+        # Weight predictor (skip when K==0)
+        if getattr(model, "K", 0) > 0 and getattr(model, "weight_pred", None) is not None:
+            alpha = model.weight_pred(x_lr)
+            _sync(device); t1 = _ms()
+        else:
+            alpha = torch.zeros((1, 0), device=device, dtype=x_lr.dtype)
+            t1 = t0
 
         # Residual (may be disabled when R <= 0)
         if getattr(model, "R", 0) > 0 and getattr(model, "resid_pred", None) is not None:
@@ -44,12 +48,26 @@ def bench_once(model: LoRIA3DLUT, device: str, H: int = 2160, W: int = 3840, amp
             delta = cp_residual_to_lut(u, v, w, c)
             _sync(device); t3 = _ms()
         else:
-            delta = torch.zeros(1, model.G, model.G, model.G, 3, device=device, dtype=model.bases.dtype)
+            # Defer delta construction until fused is available so dtype/shape match
+            u = v = w = c = None
+            delta = None
             t2 = t1
             t3 = t1
 
-        # Fuse and apply
-        L = model.fuse_bases(alpha) + delta
+        # Fuse (identity bias when K==0) and apply
+        if getattr(model, "K", 0) > 0:
+            fused = model.fuse_bases(alpha)  # [1,G,G,G,3]
+        else:
+            # Use fixed identity bias registered on the model when available
+            if hasattr(model, "identity") and model.identity is not None:
+                fused = model.identity.unsqueeze(0).expand(1, -1, -1, -1, -1).to(x_lr.dtype).to(device)
+            else:
+                fused = create_identity_lut(model.G).to(device=device, dtype=x_lr.dtype).unsqueeze(0)
+
+        if delta is None:
+            delta = torch.zeros_like(fused)
+
+        L = fused + delta
         _sync(device); t4 = _ms()
         out = model.apply_lut(x, L)
         _sync(device); t5 = _ms()
@@ -107,7 +125,9 @@ def main():
         cfg = ckpt["cfg"]
         G = cfg["model"]["G"]; K = cfg["model"]["K"]; R = cfg["model"]["R"]
         model = LoRIA3DLUT(G=G, K=K, R=R).to(device)
-        model.load_state_dict(ckpt["state_dict"], strict=True)
+        res = model.load_state_dict(ckpt["state_dict"], strict=False)
+        if hasattr(res, 'missing_keys') and (res.missing_keys or res.unexpected_keys):
+            print(f"[load_state_dict] Missing: {res.missing_keys}, Unexpected: {res.unexpected_keys}")
         print(f"Loaded checkpoint with G={G}, K={K}, R={R}")
     else:
         model = LoRIA3DLUT(G=args.G, K=args.K, R=args.R).to(device)
@@ -144,4 +164,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

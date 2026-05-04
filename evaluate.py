@@ -36,7 +36,9 @@ def main():
     dl = DataLoader(ds, batch_size=1, shuffle=False, num_workers=2)
 
     model = LoRIA3DLUT(G=G, K=K, R=R).to(device)
-    model.load_state_dict(ckpt["state_dict"], strict=True)
+    res = model.load_state_dict(ckpt["state_dict"], strict=False)
+    if hasattr(res, 'missing_keys') and (res.missing_keys or res.unexpected_keys):
+        print(f"[load_state_dict] Missing: {res.missing_keys}, Unexpected: {res.unexpected_keys}")
     model.eval()
 
     os.makedirs(args.out_dir, exist_ok=True)

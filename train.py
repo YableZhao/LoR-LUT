@@ -10,7 +10,7 @@ from core.core_lut import LoRIA3DLUT, cp_residual_to_lut
 from data.paired_folder import PairedFolderDataset
 from losses.delta_e import delta_e_2000_srgb
 from losses.lpips_wrapper import LPIPSWrapper
-from utils.metrics import psnr, deltaE2000_mean
+from utils.metrics import psnr, deltaE2000_mean, ssim
 from utils.tv import tv_3d, l2_residual, monotonicity_3d
 
 def set_seed(seed):
@@ -91,11 +91,12 @@ def train_one(cfg, work_dir):
                     loss_l1 = torch.nn.functional.l1_loss(pred, img_gt)
                     loss = loss + cfg["loss"]["l1"] * loss_l1
                 
-                # Alpha L2 regularization (following original IA-3DLUT)
+                # Alpha L2 regularization (skip when K=0 to avoid empty mean)
                 if cfg["loss"].get("alpha_l2", 0) > 0:
                     alpha = aux["alpha"]
-                    weights_norm = (alpha ** 2).mean()
-                    loss = loss + cfg["loss"]["alpha_l2"] * weights_norm
+                    if alpha.numel() > 0:
+                        weights_norm = (alpha ** 2).mean()
+                        loss = loss + cfg["loss"]["alpha_l2"] * weights_norm
                 
                 # Regularization losses (TV, Monotonicity and Delta L2)
                 # We use the LUT and delta passed from the model via aux dictionary
@@ -150,20 +151,23 @@ def train_one(cfg, work_dir):
                     d = deltaE2000_mean(pred.clamp(0,1), img_gt.clamp(0,1)).mean().item()
                     # Monitor alpha sharpness and residual strength
                     a = aux["alpha"]
-                    amax = a.max(dim=1).values.mean().item()  # alpha sharpness
+                    if a.numel() == 0:
+                        amax = 0.0
+                    else:
+                        amax = a.max(dim=1).values.mean().item()  # alpha sharpness
                     dnorm = aux["delta_norm"].item()          # residual strength
                 lr_cur = opt.param_groups[0]["lr"]
                 dt = time.time() - t0
                 print(f"[{it:6d}/{iters}] loss={loss.item():.4f} psnr={p:.2f} de2000={d:.3f} "
-                      f"amax={amax:.3f} dnorm={dnorm:.4f} lr={lr_cur:.2e} time={dt/60:.1f}m")
+                      f"amax={amax:.3f} dnorm={dnorm:.8f} lr={lr_cur:.2e} time={dt/60:.1f}m")
                 save_image(pred.clamp(0,1), os.path.join(work_dir, "last_pred.png"))
                 save_image(img_gt, os.path.join(work_dir, "last_gt.png"))
 
             if it % cfg["train"]["val_every"] == 0 or it == iters:
-                val_psnr = validate(model, dl_va, device)
-                print(f"  -> val PSNR: {val_psnr:.2f}")
-                if val_psnr > best_psnr:
-                    best_psnr = val_psnr
+                val = validate(model, dl_va, device)
+                print(f"  -> val: PSNR={val['psnr']:.2f} SSIM={val['ssim']:.4f} LPIPS={val['lpips']:.4f} DE2000={val['de2000']:.3f}")
+                if val['psnr'] > best_psnr:
+                    best_psnr = val['psnr']
                     save_ckpt(os.path.join(work_dir, "best.ckpt"), model, opt, cfg, it, best_psnr)
 
             if it >= iters:
@@ -174,18 +178,40 @@ def train_one(cfg, work_dir):
 @torch.no_grad()
 def validate(model, dl, device):
     model.eval()
-    import torch
-    from utils.metrics import psnr
-    ps = []
+    from losses.lpips_wrapper import LPIPSWrapper
+    from utils.metrics import psnr, deltaE2000_mean, ssim
+
+    lpips_metric = LPIPSWrapper().to(device)
+    sum_psnr = 0.0
+    sum_ssim = 0.0
+    sum_de = 0.0
+    sum_lpips = 0.0
+    total = 0
+
     for batch in dl:
         img_lr = batch["img_lr"].to(device, non_blocking=True)
         img_in = batch["img_in"].to(device, non_blocking=True)
         img_gt = batch["img_gt"].to(device, non_blocking=True)
 
         pred, _ = model(img_lr, img_in)
-        p = psnr(pred.clamp(0,1), img_gt.clamp(0,1))
-        ps.append(p)
-    return torch.cat(ps, dim=0).mean().item()
+
+        pred_safe = pred.float().clamp(0, 1)
+        gt_safe = img_gt.float().clamp(0, 1)
+
+        B = pred_safe.size(0)
+        sum_psnr += psnr(pred_safe, gt_safe).sum().item()
+        sum_ssim += ssim(pred_safe, gt_safe).sum().item()
+        sum_de += deltaE2000_mean(pred_safe, gt_safe).sum().item()
+        l = lpips_metric(pred_safe, gt_safe)  # scalar averaged over batch
+        sum_lpips += float(l.item()) * B
+        total += B
+
+    return {
+        'psnr': sum_psnr / max(total, 1),
+        'ssim': sum_ssim / max(total, 1),
+        'de2000': sum_de / max(total, 1),
+        'lpips': sum_lpips / max(total, 1),
+    }
 
 def save_ckpt(path, model, opt, cfg, it, best):
     os.makedirs(os.path.dirname(path), exist_ok=True)

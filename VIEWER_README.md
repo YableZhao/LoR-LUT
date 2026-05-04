@@ -1,4 +1,4 @@
-### 🎨 LoR-IA3DLUT Viewer
+### 🎨 LoR-LUT Viewer
 
 An interactive Streamlit app for visualizing and exporting image-adaptive 3D LUTs with advanced low-rank decomposition analysis.
 
@@ -72,7 +72,7 @@ streamlit run viewer_app.py
 
 #### 📊 Understanding the Model
 
-**LoR-IA3DLUT Architecture:**
+**LoR-LUT Architecture:**
 ```
 Image → [Weight Predictor] → α (alpha weights)
      → [Residual Predictor] → u, v, w, c (CP factors)
@@ -99,5 +99,4 @@ Final LUT = Σ(α[k] · Base[k]) + Σ(u[r] ⊗ v[r] ⊗ w[r]) · c[r]
 - Preview optionally downscales for speed (exports unaffected)
 - All 3D plots support interactive rotation and zoom
 - User guide available in expandable section at bottom
-
 

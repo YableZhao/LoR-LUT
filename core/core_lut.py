@@ -136,6 +136,8 @@ class LoRIA3DLUT(nn.Module):
         super().__init__()
         self.G, self.K, self.R = G, K, R
         base = create_identity_lut(G).unsqueeze(0).repeat(K, 1,1,1,1) # [K,G,G,G,3]
+        # Identity LUT buffer for K==0 (and general reference)
+        self.register_buffer("identity", create_identity_lut(G))  # [G,G,G,3]
         
         # Add noise to break symmetry and help training
         if K > 1:
@@ -143,7 +145,7 @@ class LoRIA3DLUT(nn.Module):
             base = base + noise
             base = base.clamp(0, 1)
         
-        self.bases = nn.Parameter(base) # learnable
+        self.bases = nn.Parameter(base) # learnable (may be empty when K==0)
         self.weight_pred = WeightPredictor(K=K)
         self.resid_pred  = ResidualPredictor(G=G, R=R)
         self.apply_lut   = TrilinearLUTFunction(grid_size=G)
@@ -169,23 +171,26 @@ class LoRIA3DLUT(nn.Module):
         img_lr:  [B,3,h,w] (e.g., 256^2) for predicting parameters
         img_full:[B,3,H,W] full-res for lookup
         """
-        alpha = self.weight_pred(img_lr)                    # [B,K]
-        B = alpha.size(0)
+        B = img_lr.size(0)
 
-        # If R <= 0, disable residual branch and use bases only
+        # Bases branch: if K==0, use identity bias (Residual around identity)
+        if self.K > 0:
+            alpha = self.weight_pred(img_lr)                # [B,K]
+            fused = self.fuse_bases(alpha)                  # [B,G,G,G,3]
+        else:
+            alpha = img_lr.new_zeros((B, 0))
+            fused = self.identity.unsqueeze(0).expand(B, -1, -1, -1, -1).to(img_lr.dtype)
+
+        # If R <= 0, disable residual branch
         if self.R <= 0:
-            L = self.fuse_bases(alpha)                      # [B,G,G,G,3]
+            L = fused                                       # [B,G,G,G,3]
             out = self.apply_lut(img_full, L)               # [B,3,H,W]
-            delta = torch.zeros(
-                (B, self.G, self.G, self.G, 3),
-                device=img_lr.device,
-                dtype=self.bases.dtype,
-            )
+            delta = torch.zeros_like(fused)
             aux = {
                 "alpha": alpha,
                 "delta": delta,
                 "L_final": L,
-                "delta_norm": torch.tensor(0.0, device=img_lr.device, dtype=self.bases.dtype),
+                "delta_norm": torch.tensor(0.0, device=img_lr.device, dtype=fused.dtype),
             }
             return out, aux
 
@@ -195,7 +200,7 @@ class LoRIA3DLUT(nn.Module):
         # Amplify residual to make it effective, regulated by dl2 loss
         delta = delta * 1.0
         
-        L = self.fuse_bases(alpha) + delta                 # [B,G,G,G,3], unconstrained
+        L = fused + delta                                  # [B,G,G,G,3], unconstrained
         out = self.apply_lut(img_full, L)                  # [B,3,H,W]
         
         aux = {

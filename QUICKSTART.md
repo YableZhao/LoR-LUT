@@ -1,4 +1,4 @@
-# LoR-IA-3DLUT 快速启动
+# LoR-LUT 快速启动
 
 ## 🚀 5 分钟快速测试
 
@@ -39,11 +39,11 @@ python train.py \
 
 #### Step 1: 上传代码到 GitHub
 ```bash
-cd /Users/yable/Projects/lor_ia3dlut_starter
+cd /Users/yable/Projects/LoR-LUT
 git init
 git add .
-git commit -m "LoR-IA-3DLUT initial implementation"
-git remote add origin https://github.com/YOUR_USERNAME/lor_ia3dlut.git
+git commit -m "LoR-LUT initial implementation"
+git remote add origin https://github.com/YOUR_USERNAME/lor-lut.git
 git push -u origin main
 ```
 
@@ -58,8 +58,8 @@ git push -u origin main
 **Cell 1 - Setup**:
 ```python
 !nvidia-smi  # 验证 GPU
-!git clone https://github.com/YOUR_USERNAME/lor_ia3dlut.git
-%cd lor_ia3dlut
+!git clone https://github.com/YOUR_USERNAME/lor-lut.git
+%cd lor-lut
 !pip install -r requirements.txt
 ```
 
@@ -190,8 +190,8 @@ model:
 
 ### 第 3 周：消融研究
 
-- [ ] K=4/8/12 对比
-- [ ] R=0/4/8/16 对比（R=0 等价于纯 IA-3DLUT）
+- [ ] K=0/4/8/12 对比（K=0：恒等基作为偏置，仅残差）
+- [ ] R=0/4/8/16 对比（R=0：无残差；若 K>0 仅基 LUT 融合；若 K=0 则恒等 LUT）
 - [ ] residual_scale=0/0.5/1/2 对比
 
 ### 第 4 周：论文撰写
@@ -232,5 +232,4 @@ python check_dataset.py --root /path/to/dataset
 # 第二步：开始训练（Colab）
 # 复制 notebooks/colab_train.md 到 Colab
 ```
-
 

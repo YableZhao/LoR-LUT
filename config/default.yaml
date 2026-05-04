@@ -11,29 +11,29 @@ data:
 
 model:
   G: 33
-  K: 8
-  R: 0
+  K: 0 #when k = 0, our implementation has protect the alpha_l2 so maybe you don't need to set alpha_l2 to zero.
+  R: 4
 
 train:
-  iters: 20000 #20000
+  iters: 200000 #20000
   batch: 1
-  patch: 512
-  log_every: 100
-  val_every: 4000
+  patch: 0
+  log_every: 20000
+  val_every: 100000
   amp: true
 
 loss:
   l1: 1.0
   de2000: 0.0
   tv: 0.001
-  mono: 10.0
-  dl2: 0.001
+  mono: 0.0
+  dl2: 0.0
   lpips: 0.0
   alpha_l2: 0.0001
 
 optim:
   lr: 0.0001 #0.0001
-  weight_decay: 0.0001
+  weight_decay: 0.00001
 
 sched:
   cosine: true
