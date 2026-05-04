@@ -38,7 +38,7 @@ def save_ckpt(path, model, optim, cfg, it, best_metric):
         "best": best_metric
     }, path)
 
-def train_one(cfg, work_dir):
+def train_one(cfg, work_dir, resume_path="auto"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     set_seed(cfg["seed"])
 
@@ -59,18 +59,34 @@ def train_one(cfg, work_dir):
         sch = optim.lr_scheduler.LambdaLR(opt, lr_lambda=lr_lambda)
     else:
         sch = None
-    #old
-    # scaler = torch.cuda.amp.GradScaler(enabled=(cfg["train"]["amp"] and torch.cuda.is_available()))
-    #new
     scaler = torch.amp.GradScaler('cuda', enabled=(cfg["train"]["amp"] and torch.cuda.is_available()))
     lpips_loss = LPIPSWrapper().to(device)
     os.makedirs(work_dir, exist_ok=True)
 
     iters = cfg["train"]["iters"]
     best_psnr = -1e9
-    t0 = time.time()
+    start_it = 0
 
-    it = 0
+    # Resume logic: "auto" => use {work_dir}/last.ckpt if it exists; explicit path also OK
+    if resume_path == "auto":
+        candidate = os.path.join(work_dir, "last.ckpt")
+        resume_path = candidate if os.path.exists(candidate) else ""
+    if resume_path and os.path.exists(resume_path):
+        print(f"Resuming from {resume_path}")
+        ckpt = torch.load(resume_path, map_location=device)
+        model.load_state_dict(ckpt["state_dict"])
+        opt.load_state_dict(ckpt["optimizer"])
+        start_it = ckpt.get("iter", 0)
+        best_psnr = ckpt.get("best", -1e9)
+        if sch is not None:
+            for _ in range(start_it):
+                sch.step()
+        print(f"  resumed at iter {start_it}, best_psnr={best_psnr:.2f}")
+    elif resume_path:
+        print(f"WARN: resume path {resume_path} not found, starting fresh")
+
+    t0 = time.time()
+    it = start_it
     while it < iters:
         for batch in dl_tr:
             it += 1
@@ -166,6 +182,8 @@ def train_one(cfg, work_dir):
             if it % cfg["train"]["val_every"] == 0 or it == iters:
                 val = validate(model, dl_va, device)
                 print(f"  -> val: PSNR={val['psnr']:.2f} SSIM={val['ssim']:.4f} LPIPS={val['lpips']:.4f} DE2000={val['de2000']:.3f}")
+                # Save last.ckpt every val_every so disconnect-safe (resumable from latest progress, not just from best)
+                save_ckpt(os.path.join(work_dir, "last.ckpt"), model, opt, cfg, it, best_psnr)
                 if val['psnr'] > best_psnr:
                     best_psnr = val['psnr']
                     save_ckpt(os.path.join(work_dir, "best.ckpt"), model, opt, cfg, it, best_psnr)
@@ -228,6 +246,8 @@ def parse_args():
     parser.add_argument("--cfg", type=str, default="config/default.yaml")
     parser.add_argument("--data.root", dest="data_root", type=str, default="")
     parser.add_argument("--work_dir", type=str, default="runs/exp1")
+    parser.add_argument("--resume", type=str, default="auto",
+                        help='Path to ckpt to resume from. "auto" (default) uses {work_dir}/last.ckpt if it exists. "" disables resume.')
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -239,4 +259,4 @@ if __name__ == "__main__":
         cfg["data"]["root"] = args.data_root
 
     os.makedirs(args.work_dir, exist_ok=True)
-    train_one(cfg, args.work_dir)
+    train_one(cfg, args.work_dir, resume_path=args.resume)
