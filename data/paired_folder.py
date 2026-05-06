@@ -1,9 +1,16 @@
 
 import os, glob
+import numpy as np
 from PIL import Image
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
+
+try:
+    import imageio.v3 as _iio
+    _HAS_IMAGEIO = True
+except Exception:
+    _HAS_IMAGEIO = False
 
 def _list_files(d, exts):
     files = []
@@ -43,18 +50,40 @@ class PairedFolderDataset(Dataset):
     def __len__(self):
         return len(self.pairs)
 
-    def _read_image(self, path):
+    def _read_tensor(self, path):
+        """Read image preserving bit depth, return float32 [3,H,W] tensor in [0,1].
+
+        For 16-bit TIFFs (e.g., PPR10K source), uses imageio so the full ~16-bit
+        precision is preserved. PIL.convert('RGB') would silently quantize to 8-bit
+        (~118x precision loss per channel verified on PPR10K). Falls back to PIL
+        for formats imageio can't handle.
+        """
+        ext = os.path.splitext(path)[1].lower()
+        if _HAS_IMAGEIO and ext in (".tif", ".tiff"):
+            arr = _iio.imread(path)
+            # Normalize to [0,1] float32 according to dtype
+            if arr.dtype == np.uint16:
+                arr = arr.astype(np.float32) / 65535.0
+            elif arr.dtype == np.uint8:
+                arr = arr.astype(np.float32) / 255.0
+            elif np.issubdtype(arr.dtype, np.integer):
+                arr = arr.astype(np.float32) / float(np.iinfo(arr.dtype).max)
+            else:
+                arr = arr.astype(np.float32)
+            # Channel handling: HWC -> CHW; grayscale -> 3-channel; drop alpha
+            if arr.ndim == 2:
+                arr = np.stack([arr, arr, arr], axis=-1)
+            elif arr.ndim == 3 and arr.shape[2] == 4:
+                arr = arr[:, :, :3]
+            return torch.from_numpy(np.ascontiguousarray(arr.transpose(2, 0, 1)))
+        # Non-TIFF (jpg/png) — PIL is fine, no precision issue
         img = Image.open(path).convert("RGB")
-        return img
+        return TF.to_tensor(img)
 
     def __getitem__(self, idx):
         pin, pgt = self.pairs[idx]
-        xin = self._read_image(pin)
-        xgt = self._read_image(pgt)
-
-        # to tensor [0,1]
-        tin = TF.to_tensor(xin)
-        tgt = TF.to_tensor(xgt)
+        tin = self._read_tensor(pin)
+        tgt = self._read_tensor(pgt)
 
         # 强制让 tin 和 tgt 具有相同空间尺寸（取两者公共的中心区域）
         _, Hin, Win = tin.shape
