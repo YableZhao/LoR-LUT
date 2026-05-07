@@ -12,7 +12,7 @@ data:
 model:
   G: 33
   K: 0 #when k = 0, our implementation has protect the alpha_l2 so maybe you don't need to set alpha_l2 to zero.
-  R: 8        # 4 -> 8: 翻倍 capacity, 32K -> 65K params
+  R: 32       # 8 -> 32: 32K -> 113K params (LoR-LUT paper's "best" FiveK config); test if PPR10K bottleneck is capacity
 
 train:
   iters: 1000000     # 200k -> 1M: 长训
