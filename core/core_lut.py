@@ -112,13 +112,19 @@ class ResidualPredictor(nn.Module):
         v = self.fc_v(h).view(-1, self.R, self.G)
         w = self.fc_w(h).view(-1, self.R, self.G)
         c = self.fc_c(h).view(-1, self.R, 3)
-        
-        # Use sigmoid instead of softmax for larger values
-        # u = torch.sigmoid(u)
-        # v = torch.sigmoid(v)
-        # w = torch.sigmoid(w)
-        # c: no tanh, allow larger range (will be scaled by delta*100)
-        # c = c * 0.1  # Scale to reasonable range
+
+        # Bound the rank-1 factors so each component is an interpretable "color brush"
+        # (matches the paper's interpretability claim and the cp_residual_to_lut docstring):
+        #   - softmax(u/v/w) along the LUT axis -> each is a distribution over G grid points,
+        #     making u_r ⊗ v_r ⊗ w_r a localized region in the RGB cube
+        #   - tanh(c) -> bounded RGB shift in [-1, 1] per channel
+        # Without these, raw FC outputs make "delta" unbounded and the rank-1 components
+        # numerically meaningless (the ECCV submission's Fig 8 / Viewer narrative implicitly
+        # assumes bounded factors).
+        u = torch.softmax(u, dim=-1)
+        v = torch.softmax(v, dim=-1)
+        w = torch.softmax(w, dim=-1)
+        c = torch.tanh(c)
         return u, v, w, c
 
 # -------------------- Identity LUT initializer -------------------
