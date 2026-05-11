@@ -144,18 +144,25 @@ class LoRIA3DLUT(nn.Module):
         base = create_identity_lut(G).unsqueeze(0).repeat(K, 1,1,1,1) # [K,G,G,G,3]
         # Identity LUT buffer for K==0 (and general reference)
         self.register_buffer("identity", create_identity_lut(G))  # [G,G,G,3]
-        
+
         # Add noise to break symmetry and help training
         if K > 1:
             noise = torch.randn_like(base) * 0.01  # 1% random perturbation
             base = base + noise
             base = base.clamp(0, 1)
-        
+
         self.bases = nn.Parameter(base) # learnable (may be empty when K==0)
         self.weight_pred = WeightPredictor(K=K)
         self.resid_pred  = ResidualPredictor(G=G, R=R)
         self.apply_lut   = TrilinearLUTFunction(grid_size=G)
-        
+
+        # Learnable scaling for the bounded CP residual.
+        # With softmax(u,v,w)+tanh(c), raw delta peaks at ~R/G^3 ~ 1e-3 per cell —
+        # too small to make useful corrections. Init=100 brings dnorm into the
+        # 0.05-0.15 range seen in pre-softmax runs (which worked). Learnable, so
+        # the model can adjust if softmax distributions sharpen during training.
+        self.delta_scale = nn.Parameter(torch.tensor(100.0))
+
         # Initialize residual predictor with larger weights for faster learning
         nn.init.normal_(self.resid_pred.fc_c.weight, mean=0.0, std=0.1)
         nn.init.zeros_(self.resid_pred.fc_c.bias)
@@ -201,18 +208,20 @@ class LoRIA3DLUT(nn.Module):
             return out, aux
 
         # Residual branch enabled
-        u,v,w,c = self.resid_pred(img_lr)                  # low-rank
+        u,v,w,c = self.resid_pred(img_lr)                  # low-rank (already softmax/tanh bounded)
         delta = cp_residual_to_lut(u,v,w,c)                # [B,G,G,G,3]
-        # Amplify residual to make it effective, regulated by dl2 loss
-        delta = delta * 1.0
-        
+        # Scale by learnable factor to bring magnitude back into useful range
+        # (softmax+tanh would otherwise cap delta at ~1e-3 per cell).
+        delta = delta * self.delta_scale
+
         L = fused + delta                                  # [B,G,G,G,3], unconstrained
         out = self.apply_lut(img_full, L)                  # [B,3,H,W]
-        
+
         aux = {
             "alpha": alpha,
             "delta": delta, # for dl2 loss
             "L_final": L,   # for tv loss
             "delta_norm": delta.abs().mean(),
+            "delta_scale": self.delta_scale.detach(),  # monitor learnable scale
         }
         return out, aux

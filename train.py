@@ -172,10 +172,13 @@ def train_one(cfg, work_dir, resume_path="auto"):
                     else:
                         amax = a.max(dim=1).values.mean().item()  # alpha sharpness
                     dnorm = aux["delta_norm"].item()          # residual strength
+                    # Optional: learnable delta scale (when present)
+                    ds = aux.get("delta_scale")
+                    dscale = ds.item() if isinstance(ds, torch.Tensor) else 1.0
                 lr_cur = opt.param_groups[0]["lr"]
                 dt = time.time() - t0
                 print(f"[{it:6d}/{iters}] loss={loss.item():.4f} psnr={p:.2f} de2000={d:.3f} "
-                      f"amax={amax:.3f} dnorm={dnorm:.8f} lr={lr_cur:.2e} time={dt/60:.1f}m")
+                      f"amax={amax:.3f} dscale={dscale:.2f} dnorm={dnorm:.6f} lr={lr_cur:.2e} time={dt/60:.1f}m")
                 save_image(pred.clamp(0,1), os.path.join(work_dir, "last_pred.png"))
                 save_image(img_gt, os.path.join(work_dir, "last_gt.png"))
 
